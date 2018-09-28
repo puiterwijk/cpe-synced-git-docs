@@ -18,13 +18,13 @@ Pagure is the web interface shown to users to browse through the source reposito
 
 ==== Dynamic ACLs
 
-Dynamic ACLs are used to enforce push permissions: they make the decisions on who can push to which branches on which repositories.
-They are hooked into the system as Git pre-receive and update hooks, which means they get run as part of any push by either Git or repoSpanner.
+Dynamic ACLs are used to enforce push permissions: they make the decisions such as who can push to which branches on which repositories.
+They are hooked into the system as Git pre-receive and update hooks, which means they get run as part of any push by either Git or <<repoSpanner>>.
 
 
 ==== KeyHelper
 
-The KeyHelper (`/usr/libexec/pagure/keyhelper.py`) is used as `AuthorizedKeysCommand` in sshd, to provide a list of SSH keys valid to connect to the specific users.
+The KeyHelper (`/usr/libexec/pagure/keyhelper.py`) is used as `AuthorizedKeysCommand` in `sshd`, to provide a list of SSH keys valid to connect to the specific users.
 It will tell SSH to use <<AclChecker>> as the entry command.
 
 
@@ -32,7 +32,7 @@ It will tell SSH to use <<AclChecker>> as the entry command.
 
 The AclChecker (`/usr/libexec/pagure/aclchecker.py`) is used as the entry command for SSH, provided by <<KeyHelper>>, to make sure that people don't access repositories to which they have no access.
 
-After checking whether the user has access to the repository, it will call to either Git or <<repoBridge>> to provide the actual Git operations to the client.
+After checking whether the user has access to the repository, it will call either Git or <<repoBridge>> to provide the actual Git operations to the client.
 
 
 ==== LibGit2
@@ -46,7 +46,7 @@ The source code of this fork is available on https://github.com/puiterwijk/libgi
 === repoSpanner
 
 repoSpanner is used to store and serve the underlying Git repositories.
-It takes care of the synchronization between its region nodes,
+It takes care of the synchronization between its region nodes.
 
 TIP: To provide the synced Git repositories, the CentOS and Fedora nodes are in the same "region". For more details, see <<Setup>>.
 
@@ -58,12 +58,12 @@ This is called by <<AclChecker>> to provide Git operations.
 
 == Interactions
 
-This section gives background as to how the various components interact with eachother during various flows.
+This section gives background as to how the various components interact with each other during various flows.
 
 
 === Web interface and Workers
 
-The Pagure web interface and workers interacts with repositories via `python-libgit2`, which is a CPython extension making the `LibGit2` library available from Python.
+The Pagure web interface and workers interact with repositories via `python-libgit2`, which is a CPython extension making the `LibGit2` library available from Python.
 
 When Pagure determines that it wants to access a Git repository that's hosted on a repoSpanner region, it will create (if it doesn't exist yet) a pseudo-repository to create a local cache of objects for the specified repository.
 In this pseudo-repository, it will set up some configuration that is specific to the repoSpanner integration to LibGit2, to facilitate the bridging.
@@ -77,26 +77,26 @@ When it wants to change something in a repository that's backed by repoSpanner, 
 
 ==== Key Checking and getting access
 
-When a user directly pushes to SSH, sshd will call out to <<KeyHelper>> to determine whether they are presenting a valid SSH key, to prevent the need for a statically maintained list of such keys.
+When a user directly pushes to SSH, `sshd` will call out to <<KeyHelper>> to determine whether they are presenting a valid SSH key, to prevent the need for a statically maintained list of such keys.
 
-NOTE: This lookup is currently not as efficient as could be, the changes needed to do that are documented and in the queue.
+NOTE: This lookup is currently not as efficient as it could be, the changes needed to do that are documented and in the queue.
 
 
 ==== Repo ACL Checking
 
-The KeyHelper will tell sshd to restrict the users' SSH access as much as possible (it will provide the `restrict` option, which enabled all of the limitations SSH implements at any time), and use an entry command that points to <<AclChecker>>.
+The KeyHelper will tell `sshd` to restrict the users' SSH access as much as possible (it will provide the `restrict` option, which enables all of the limitations SSH implements at any time), and uses an entry command that points to <<AclChecker>>.
 
-After sshd verifies that the users' key provided by KeyHelper is correct, it will force the user to execute AclChecker.
+After `sshd` verifies that the users' key provided by KeyHelper is correct, it will force the user to execute AclChecker.
 
 AclChecker retrieves the project information from the Pagure database.
-If the username passed through by KeyChecker does not have access to the requested repository, it will print an error and `exit(1)`.
-If it determines that the user does have access to the request repository, it determines whether the project's repositories are on repoSpanner.
+If the username supplied by KeyChecker does not have access to the requested repository, it will print an error and `exit(1)`.
+If it determines that the user does have access to the requested repository, it determines whether the project's repositories are on repoSpanner.
 
 
 ==== Proceeding to Git
 
 If the project is on repoSpanner, it will run <<repoBridge>> with the username, requested operation and repository name as arguments.
-It will also provide the repoSpanner region in an environment variable so the repoBridge can look up the corresponding
+It will also provide the repoSpanner region in an environment variable so the repoBridge can look up the corresponding configuration.
 
 If the project is not on repoSpanner, it will instead call Git directly, with the requested operation and repository name as arguments.
 It will provide the username in a "GL_USER" environment variable so the hooks can use that to determine ACLs.
@@ -106,22 +106,22 @@ Either Git or repoBridge will respond the way the Git client expects, either sen
 
 == Failure modes
 
-This section contains information on what will/should fail with various error conditions, and where to look at for debugging purposes.
-Ideally, sections contain example log entries for various sides to help ease finding the correct section.
+This section contains information on what will/should fail with various error conditions, and where to look for debugging help.
+Ideally, sections contain example log entries for clients, Pagure and repoSpanner to help ease finding the correct section.
 This section is expected to be expanded as operational experience is gathered.
 
 
-=== repoSpanner nodes offline
+=== repoSpanner node(s) are offline
 
 A repoSpanner region has a specific number of nodes.
-The system is designed so that as long as a majority of nodes keep communication with eachother, everything will proceed in an orderly fashion.
+The system is designed so that as long as a majority of nodes keep communication with each other, everything will proceed in an orderly fashion.
 
 If a node gets disconnected from the rest of the region, it will still be able to serve, but in a read-only fashion.
 It also will not get the latest updates to ref status until the connection problem is resolved, and will serve older ref information in the meantime.
 
-If any node was offline while a push was processed, it will be brought back in sync with regards to both refs and actual Git objects after it reestablishes communication.
+If any node was offline while a push was being processed, it will be brought back in sync with regards to both refs and actual Git objects after it reestablishes communication.
 
-If a majority of the nodes go offline, or more than one network partitioning occurs leading to no partition with a majority of nodes online, all of the nodes will become readonly, and any attempts to push to them will error out with an "No majority of nodes online" error.
+If a majority of the nodes go offline, or more than one network partitioning occurs leading to no partition with a majority of nodes online, all of the nodes will become read-only, and any attempts to push to them will error out with: "No majority of nodes online".
 
 
 ==== Example log entries
